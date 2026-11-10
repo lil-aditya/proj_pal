@@ -5,7 +5,25 @@ import { PayPalError } from "@/lib/paypal";
 
 export const maxDuration = 120;
 
+// Simple per-IP limiter so a public demo link can't drain the free Gemini quota.
+const WINDOW_MS = 10 * 60 * 1000;
+const MAX_PER_WINDOW = Number(process.env.CHAT_LIMIT_PER_10_MIN) || 30;
+const hits = new Map<string, number[]>();
+
+function rateLimited(ip: string) {
+  const now = Date.now();
+  const recent = (hits.get(ip) ?? []).filter((t) => now - t < WINDOW_MS);
+  recent.push(now);
+  hits.set(ip, recent);
+  if (hits.size > 5000) hits.clear();
+  return recent.length > MAX_PER_WINDOW;
+}
+
 export async function POST(req: Request) {
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "local";
+  if (rateLimited(ip)) {
+    return Response.json({ error: "Demo limit reached. Please wait a few minutes and try again." }, { status: 429 });
+  }
   let history: ChatTurn[];
   try {
     const body = await req.json();

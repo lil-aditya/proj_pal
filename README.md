@@ -11,6 +11,9 @@ Built for the PayPal AI Hackathon 2026.
 - AI-written payment reminders, with tone matched to how overdue the invoice is
 - Cash-flow insights: outstanding, overdue, collected, per-client days-to-pay
 - AG Grid invoice dashboard with one-click actions and the payer's PayPal link
+- Live "just paid" alerts (the dashboard polls PayPal every 15 seconds)
+- Voice input in the chat (browser speech recognition)
+- Per-visitor chat rate limit, so a public demo can't drain the free AI quota
 
 ## Stack
 

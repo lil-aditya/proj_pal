@@ -43,24 +43,67 @@ export default function Home() {
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
+  const [listening, setListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastStatus = useRef<Map<string, string> | null>(null);
+
+  const toast = useCallback((text: string) => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t, { id, text }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 7000);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
       const res = await fetch("/api/invoices", { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      setInvoices(json.invoices);
+      const list: Invoice[] = json.invoices;
+      // Announce invoices that became paid since the last poll (e.g. the client just paid on PayPal).
+      if (lastStatus.current) {
+        for (const inv of list) {
+          const before = lastStatus.current.get(inv.id);
+          if (before && before !== inv.status && (inv.status === "PAID" || inv.status === "MARKED_AS_PAID")) {
+            toast(`💸 ${inv.clientName} just paid invoice ${inv.number}: ${money(inv.total)}`);
+          }
+        }
+      }
+      lastStatus.current = new Map(list.map((i) => [i.id, i.status]));
+      setInvoices(list);
       setInsights(json.insights);
       setLoadError("");
     } catch (e) {
       setLoadError((e as Error).message);
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     refresh();
+    // Light polling so payments made on PayPal show up live.
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 15000);
+    return () => clearInterval(t);
   }, [refresh]);
+
+  useEffect(() => {
+    setVoiceSupported(Boolean(getSpeechRecognition()));
+  }, []);
+
+  const startVoice = () => {
+    const SR = getSpeechRecognition();
+    if (!SR || listening) return;
+    const rec = new SR();
+    rec.lang = navigator.language || "en-US";
+    rec.interimResults = true;
+    rec.onresult = (e) => setInput(Array.from(e.results).map((r) => r[0].transcript).join(" "));
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    setListening(true);
+    rec.start();
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -161,7 +204,7 @@ export default function Home() {
         </button>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-[1fr_420px]">
+      <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_400px]">
         <section className="flex min-h-0 flex-col gap-4">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Stat label="Outstanding" value={insights ? money(insights.outstanding) : "—"} />
@@ -197,7 +240,7 @@ export default function Home() {
                     m.role === "user" ? "bg-brand-2 text-white" : m.error ? "bg-rose-50 text-rose-800" : "bg-slate-100"
                   }`}
                 >
-                  {m.content}
+                  <RichText text={m.content} />
                 </div>
                 {m.cards?.map((c, ci) => (
                   <ApprovalCard
@@ -230,17 +273,73 @@ export default function Home() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="e.g. Bill Acme $500 for the website audit"
-              className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-2"
+              placeholder={listening ? "Listening…" : "e.g. Bill Acme $500 for the website audit"}
+              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-2"
             />
+            {voiceSupported && (
+              <button
+                type="button"
+                onClick={startVoice}
+                title="Speak your request"
+                aria-label="Speak your request"
+                className={`rounded-lg border px-3 py-2 text-sm ${listening ? "animate-pulse border-rose-400 bg-rose-50" : "border-slate-300 bg-white hover:bg-slate-50"}`}
+              >
+                🎤
+              </button>
+            )}
             <button disabled={busy || !input.trim()} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
               Send
             </button>
           </form>
         </aside>
       </main>
+
+      <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex flex-col gap-2" aria-live="polite">
+        {toasts.map((t) => (
+          <div key={t.id} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg">
+            {t.text}
+          </div>
+        ))}
+      </div>
     </div>
   );
+}
+
+/** Minimal formatting for model replies: **bold** and bullet lines, without injecting HTML. */
+function RichText({ text }: { text: string }) {
+  return (
+    <>
+      {text.split("\n").map((line, i) => {
+        const bullet = /^\s*[-*•]\s+/.test(line);
+        const body = line.replace(/^\s*[-*•]\s+/, "");
+        const parts = body.split(/(\*\*[^*]+\*\*)/g).map((p, j) =>
+          p.startsWith("**") && p.endsWith("**") ? <strong key={j}>{p.slice(2, -2)}</strong> : p,
+        );
+        return (
+          <span key={i} className={bullet ? "block pl-3 -indent-3" : "block"}>
+            {bullet && "• "}
+            {parts}
+            {!line && " "}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+type SpeechRec = {
+  lang: string;
+  interimResults: boolean;
+  onresult: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
+  onend: () => void;
+  onerror: () => void;
+  start: () => void;
+};
+
+function getSpeechRecognition(): (new () => SpeechRec) | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as { SpeechRecognition?: new () => SpeechRec; webkitSpeechRecognition?: new () => SpeechRec };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "good" | "bad" }) {

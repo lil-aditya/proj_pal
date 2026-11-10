@@ -10,11 +10,13 @@ PayPal already has the hard pieces: invoicing, hosted payment pages, and payment
 - **Approval before anything goes out.** Every action that reaches a client or changes money state (sending an invoice, a reminder, or a cancellation) appears as an **approval card**. You can edit the reminder text, then click *Approve & send*. The AI can draft and propose. Only you can send.
 - **Chases late payers in the right tone.** PayPilot looks up an invoice's real status and how overdue it is before writing a reminder. The tone is friendly when the invoice is just due and firmer when it's weeks late.
 - **Cash-flow answers.** *"Who owes me money?"* or *"How's my cash flow?"* returns real numbers: outstanding, overdue, collected, and which clients pay slowly.
-- **Live dashboard.** An AG Grid table of every invoice, with status and days-late badges, one-click actions, and a link to the client's PayPal payment page.
+- **Live dashboard.** An AG Grid table of every invoice, with status and days-late badges, a totals row, one-click actions, and a link to the client's PayPal payment page.
+- **"You just got paid" alerts.** The dashboard checks PayPal every 15 seconds. When a client pays on PayPal's invoice page, the invoice turns green and a notification pops up.
+- **Talk instead of type.** A microphone button lets you speak the request, using the browser's built-in speech recognition.
 
 ## How I built it
 
-- **Frontend:** Next.js 16 (App Router) + React 19 + Tailwind CSS 4. The invoice table uses **AG Grid** with custom cell renderers for status, overdue badges and row actions.
+- **Frontend:** Next.js 16 (App Router) + React 19 + Tailwind CSS 4. The invoice table uses **AG Grid** with custom cell renderers for status, overdue badges and row actions, a pinned actions column and a pinned totals row.
 - **AI agent:** **Google Gemini** (Flash) through the official `@google/genai` SDK, with my own function-calling loop. The agent layer doesn't depend on one provider: the same tool definitions also run on Anthropic's Claude. I gave the agent six tools, each defined once with a Zod schema that is validated on every call: `list_invoices`, `get_invoice`, `create_invoice_draft`, `propose_reminder`, `propose_cancel` and `payment_insights`.
 - **PayPal:** a typed client for the **PayPal Invoicing v2 REST API**. It handles OAuth2 client-credentials with token caching, invoice-number generation, draft creation, send, remind, cancel and payment recording. Clients pay on PayPal's own hosted invoice page.
 - **Approval by design:** tools that would affect a client never call PayPal's send, remind or cancel endpoints. They return a *proposal* to the UI. Those endpoints sit behind separate API routes that only an approval click can reach. So the safety rule doesn't depend on the model behaving: the agent's tools have no route to them at all.
@@ -38,7 +40,8 @@ so a freelancer can see both *how much* money is late and *who* is usually late.
 - **Letting the AI handle money safely.** The obvious design lets the agent call PayPal's send endpoint itself. That's the wrong design: an AI should not email a client a bill because it misread "\$400" as "\$4,000". Splitting every action into an AI *proposal* and a human *execution* through separate routes was the key decision of the build.
 - **Keeping the model honest about what happened.** After drafting, a language model wants to say "I've sent the invoice!". The tool results and the system prompt both state that an action is only *queued*, and the UI confirms an action only after PayPal's API returns success.
 - **Turning casual language into invoice data.** "3 hrs at 40", "due Friday" and "half up front" all have to become exact line items, quantities, units and ISO dates. When something is truly missing, such as an email address, the agent asks one short question instead of guessing.
-- **PayPal API details.** Learning which invoice statuses count as "open", when a draft must be deleted rather than cancelled, and how the create endpoint responds with and without `Prefer: return=representation`.
+- **PayPal API details.** The invoice *list* endpoint leaves out line items and payment transactions, so my first dashboard had an empty Items column and no "days to pay" numbers. I now fetch each invoice's full record and cache it until PayPal reports a change. I also had to learn which statuses count as "open" and that a draft must be deleted rather than cancelled.
+- **Building on a zero budget.** I could only use free tiers, so the agent runs on Gemini's free Flash tier. That meant handling rate limits gracefully, adding a per-visitor limit so a public demo link can't drain the quota, and pinning a model version after the "latest" alias turned out not to exist on the API version the SDK calls.
 
 ## Accomplishments that I'm proud of
 
@@ -54,7 +57,7 @@ so a freelancer can see both *how much* money is late and *who* is usually late.
 
 ## What's next for PayPilot
 
-- Voice notes and photos of receipts or timesheets as input.
+- Photos of receipts or timesheets as input.
 - Scheduled, automatic follow-ups, approved once per client as a policy.
 - PayPal webhooks for real-time "you just got paid" notifications.
 - Recurring invoices, deposits and milestone billing for longer projects.

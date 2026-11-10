@@ -24,6 +24,14 @@ const STATUS_STYLE: Record<string, string> = {
   CANCELLED: "bg-rose-100 text-rose-700",
 };
 
+function fmtMoney(n: number, currency: string) {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n);
+  } catch {
+    return `${n.toFixed(2)} ${currency}`;
+  }
+}
+
 export type RowAction = "send" | "record-payment" | "remind-ai";
 
 export default function InvoiceGrid({
@@ -35,16 +43,28 @@ export default function InvoiceGrid({
 }) {
   const cols = useMemo<ColDef<Invoice>[]>(
     () => [
-      { field: "number", headerName: "Invoice", width: 110 },
-      { field: "clientName", headerName: "Client", flex: 1, minWidth: 140 },
+      { field: "number", headerName: "Invoice", width: 92 },
+      {
+        field: "clientName",
+        headerName: "Client",
+        flex: 1,
+        minWidth: 170,
+        tooltipField: "items",
+        cellRenderer: (p: ICellRendererParams<Invoice>) => (
+          <span className="flex h-full flex-col justify-center leading-tight">
+            <span className="truncate">{p.value}</span>
+            {p.data?.items && <span className="truncate text-xs text-slate-500">{p.data.items}</span>}
+          </span>
+        ),
+      },
       {
         field: "status",
-        width: 150,
+        width: 142,
         cellRenderer: (p: ICellRendererParams<Invoice>) => {
           if (p.node.rowPinned) return null;
           const overdue = (p.data?.daysOverdue ?? 0) > 0;
           return (
-            <span className="flex items-center gap-1.5">
+            <span className="flex h-full items-center gap-1.5">
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[p.value] ?? "bg-slate-100"}`}>
                 {String(p.value).replace(/_/g, " ").toLowerCase()}
               </span>
@@ -59,22 +79,30 @@ export default function InvoiceGrid({
       },
       {
         field: "total",
-        width: 120,
+        width: 104,
         type: "rightAligned",
-        valueFormatter: (p) => (p.data ? `${p.value.toFixed(2)} ${p.data.currency}` : ""),
+        valueFormatter: (p) => (p.data ? fmtMoney(p.value, p.data.currency) : ""),
       },
       {
         field: "due",
-        headerName: "Due amount",
-        width: 125,
+        headerName: "Owed",
+        width: 104,
         type: "rightAligned",
-        valueFormatter: (p) => (p.data ? `${p.value.toFixed(2)} ${p.data.currency}` : ""),
+        valueFormatter: (p) => (p.data ? fmtMoney(p.value, p.data.currency) : ""),
       },
-      { field: "dueDate", headerName: "Due date", width: 115, sort: "asc" },
-      { field: "items", flex: 1.3, minWidth: 160, tooltipField: "items" },
+      {
+        field: "dueDate",
+        headerName: "Due",
+        width: 92,
+        filter: false,
+        sort: "asc",
+        valueFormatter: (p) =>
+          p.value ? new Date(p.value).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }) : "",
+      },
       {
         headerName: "Actions",
-        width: 230,
+        width: 272,
+        pinned: "right",
         sortable: false,
         filter: false,
         cellRenderer: (p: ICellRendererParams<Invoice>) => {
@@ -83,7 +111,7 @@ export default function InvoiceGrid({
           const open = ["SENT", "UNPAID", "PARTIALLY_PAID"].includes(inv.status);
           const btn = "rounded-md px-2 py-0.5 text-xs font-medium border";
           return (
-            <span className="flex gap-1.5">
+            <span className="flex h-full items-center gap-1.5">
               {inv.status === "DRAFT" && (
                 <button className={`${btn} border-blue-600 bg-blue-600 text-white`} onClick={() => onAction("send", inv)}>
                   Send
@@ -116,10 +144,11 @@ export default function InvoiceGrid({
   const totals = useMemo(() => {
     const byCur = new Map<string, Invoice>();
     for (const i of invoices) {
-      if (i.status === "CANCELLED") continue;
+      // Match the "Outstanding" card: drafts and cancelled invoices aren't owed yet.
+      if (i.status === "CANCELLED" || i.status === "DRAFT") continue;
       const t =
         byCur.get(i.currency) ??
-        ({ id: `total-${i.currency}`, number: "Total", clientName: `${i.currency} · active invoices`, currency: i.currency, total: 0, due: 0 } as Invoice);
+        ({ id: `total-${i.currency}`, number: "Total", clientName: `${i.currency} · sent invoices`, currency: i.currency, total: 0, due: 0 } as Invoice);
       t.total += i.total;
       t.due += i.due;
       byCur.set(i.currency, t);
@@ -137,7 +166,7 @@ export default function InvoiceGrid({
         getRowId={(p) => p.data.id}
         pinnedBottomRowData={totals}
         getRowStyle={(p) => (p.node.rowPinned ? { fontWeight: 600, background: "#f1f5fb" } : undefined)}
-        rowHeight={44}
+        rowHeight={50}
         overlayNoRowsTemplate="No invoices yet. Ask PayPilot to create one."
       />
     </div>
