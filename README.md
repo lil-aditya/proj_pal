@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PayPilot — AI back office for freelancers
 
-## Getting Started
+Tell PayPilot about a job in plain words. It creates the PayPal invoice, tracks payment, and chases late clients. **Nothing is sent until you approve it.**
 
-First, run the development server:
+Built for the PayPal AI Hackathon 2026.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Features
+
+- Natural language → PayPal draft invoice (line items, quantities, due dates)
+- Approval cards for every send, reminder and cancellation; reminders are editable
+- AI-written payment reminders, with tone matched to how overdue the invoice is
+- Cash-flow insights: outstanding, overdue, collected, per-client days-to-pay
+- AG Grid invoice dashboard with one-click actions and the payer's PayPal link
+
+## Stack
+
+Next.js 16 · React 19 · Tailwind 4 · AG Grid · Google Gemini via `@google/genai` (Claude also supported) · PayPal Invoicing v2 REST API
+
+## Architecture
+
+```
+Browser ──chat──▶ /api/chat ──▶ Gemini / Claude agent (function calling)
+                                  ├─ list_invoices / get_invoice / payment_insights ─▶ PayPal (read)
+                                  ├─ create_invoice_draft ─▶ PayPal (DRAFT only)
+                                  └─ propose_reminder / propose_cancel ─▶ approval card (no PayPal call)
+Browser ──Approve──▶ /api/invoices/[id]/send|remind|cancel ─▶ PayPal (write)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The agent's tools cannot reach the send, remind or cancel endpoints. Only an approval click in the UI can.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Run locally
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Create a PayPal **sandbox** app at developer.paypal.com → Apps & Credentials, and get a free Gemini API key at aistudio.google.com/apikey.
+2. `cp .env.example .env.local` and fill in the keys.
+3. `npm install && npm run dev`, then open http://localhost:3000.
 
-## Learn More
+To test payment end to end, open an invoice's **Payer view** link and pay with your sandbox *personal* account (developer.paypal.com → Sandbox accounts). Then click Refresh.
 
-To learn more about Next.js, take a look at the following resources:
+## Demo data
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Fill your **sandbox** with realistic invoices (overdue, paid, open, draft):
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+node --env-file=.env.local --experimental-strip-types scripts/seed.ts
+```
 
-## Deploy on Vercel
+The script refuses to run when `PAYPAL_ENV=live`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deploy (Render free tier)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Push this repo to GitHub.
+2. Render dashboard → **New → Blueprint** → select the repo. `render.yaml` sets up a free Node web service.
+3. Fill in `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `GEMINI_API_KEY` (and optionally `PAYPAL_BUSINESS_NAME`) when prompted.
+
+Free instances sleep when idle, so the first request after a while takes ~30–60 s.
