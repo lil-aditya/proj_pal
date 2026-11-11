@@ -127,9 +127,15 @@ export default function InvoiceGrid({
                   </button>
                 </>
               )}
-              {inv.payerUrl && open && (
-                <a className={`${btn} border-slate-300 bg-white`} href={inv.payerUrl} target="_blank" rel="noreferrer">
-                  Payer view
+              {open && (
+                <a
+                  className={`${btn} border-slate-300 bg-white`}
+                  href={`/c/${inv.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="The page your client sees: pay on PayPal, or ask for a plan or more time"
+                >
+                  Client page
                 </a>
               )}
             </span>

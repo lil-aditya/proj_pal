@@ -9,6 +9,8 @@ Built for the PayPal AI Hackathon 2026.
 - Natural language → PayPal draft invoice (line items, quantities, due dates)
 - Approval cards for every send, reminder and cancellation; reminders are editable
 - AI-written payment reminders, with tone matched to how overdue the invoice is
+- Client page for every invoice: pay on PayPal, or negotiate a payment plan or extension with a client-facing agent that works inside limits enforced in code
+- Client-request inbox: approving a plan replaces the invoice with one PayPal invoice per instalment
 - Cash-flow insights: outstanding, overdue, collected, per-client days-to-pay
 - AG Grid invoice dashboard with one-click actions and the payer's PayPal link
 - Live "just paid" alerts (the dashboard polls PayPal every 15 seconds)
@@ -30,6 +32,17 @@ Browser ──Approve──▶ /api/invoices/[id]/send|remind|cancel ─▶ PayP
 ```
 
 The agent's tools cannot reach the send, remind or cancel endpoints. Only an approval click in the UI can.
+
+```
+Client ──chat──▶ /api/portal/[id]/chat ──▶ client agent (tools bound to that one invoice)
+                                             └─ propose_payment_plan / request_extension / report_issue
+                                                  └─ limits checked in src/lib/negotiation.ts ─▶ request stored (no PayPal call)
+Freelancer ──Approve──▶ /api/requests/[id]/approve ─▶ PayPal: instalment invoices created and sent, original cancelled
+```
+
+Negotiation limits (env vars, with defaults): `PLAN_MAX_INSTALMENTS=3`, `PLAN_MIN_FIRST_PCT=30`, `PLAN_MAX_DAYS=45`, `EXTENSION_MAX_DAYS=14`, `PLAN_MIN_AMOUNT=50`.
+
+This is a single-business demo: the dashboard has no sign-in, and client requests are kept in a local JSON file (`.data/`), which a free Render instance loses when it restarts. Invoices themselves always live in PayPal.
 
 ## Run locally
 
