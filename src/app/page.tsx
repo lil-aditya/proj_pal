@@ -4,7 +4,9 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Proposal } from "@/lib/agent";
 import type { Invoice } from "@/lib/paypal";
+import type { ClientRequest } from "@/lib/store";
 import type { RowAction } from "@/components/InvoiceGrid";
+import RichText from "@/components/RichText";
 
 const InvoiceGrid = dynamic(() => import("@/components/InvoiceGrid"), { ssr: false });
 
@@ -46,8 +48,11 @@ export default function Home() {
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [listening, setListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
+  const [requests, setRequests] = useState<ClientRequest[]>([]);
+  const [deciding, setDeciding] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastStatus = useRef<Map<string, string> | null>(null);
+  const seenRequests = useRef<Set<string> | null>(null);
 
   const toast = useCallback((text: string) => {
     const id = Date.now() + Math.random();
@@ -77,7 +82,45 @@ export default function Home() {
     } catch (e) {
       setLoadError((e as Error).message);
     }
+    // Requests that clients filed from their invoice pages.
+    try {
+      const res = await fetch("/api/requests", { cache: "no-store" });
+      if (!res.ok) return;
+      const pending: ClientRequest[] = (await res.json()).pending;
+      if (seenRequests.current) {
+        for (const r of pending) {
+          if (!seenRequests.current.has(r.id)) toast(`📩 ${r.clientName} sent a request about invoice ${r.invoiceNumber}`);
+        }
+      }
+      seenRequests.current = new Set(pending.map((r) => r.id));
+      setRequests(pending);
+    } catch {
+      // the inbox is optional; keep the dashboard working without it
+    }
   }, [toast]);
+
+  const decide = async (r: ClientRequest, decision: "approve" | "decline") => {
+    setDeciding(r.id);
+    try {
+      const res = await fetch(`/api/requests/${r.id}/${decision}`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      toast(
+        decision === "decline"
+          ? `Declined ${r.clientName}'s request`
+          : r.kind === "payment_plan"
+            ? `✅ Payment plan set up for ${r.clientName}: ${r.instalments?.length} instalment invoices sent`
+            : r.kind === "extension"
+              ? `✅ Due date moved for ${r.clientName}`
+              : `Marked ${r.clientName}'s message as handled`,
+      );
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDeciding("");
+      refresh();
+    }
+  };
 
   useEffect(() => {
     refresh();
@@ -222,7 +265,46 @@ export default function Home() {
               Couldn&apos;t load invoices: {loadError}
             </div>
           )}
-          <div className="min-h-[360px] flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
+          {requests.length > 0 && (
+            <div className="max-h-[42%] space-y-2 overflow-y-auto rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                Client requests · {requests.length} waiting for you
+              </p>
+              {requests.map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white px-3 py-2.5">
+                  <div className="min-w-0 flex-1 text-sm">
+                    <p className="font-medium">
+                      {r.kind === "payment_plan" ? "🗓️" : r.kind === "extension" ? "⏳" : "❓"} {r.clientName} · invoice {r.invoiceNumber}
+                      <span className="ml-2 text-xs font-normal text-slate-500">
+                        {r.kind === "payment_plan" ? "asks for a payment plan" : r.kind === "extension" ? "asks for more time" : "has a question or problem"}
+                      </span>
+                    </p>
+                    <p className="text-slate-700">{r.summary}</p>
+                    {r.reason && <p className="text-xs italic text-slate-500">Client says: “{r.reason}”</p>}
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      disabled={deciding === r.id}
+                      onClick={() => decide(r, "approve")}
+                      className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      {deciding === r.id ? "Working…" : r.kind === "issue" ? "Mark as handled" : "Approve"}
+                    </button>
+                    {r.kind !== "issue" && (
+                      <button
+                        disabled={deciding === r.id}
+                        onClick={() => decide(r, "decline")}
+                        className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs disabled:opacity-50"
+                      >
+                        Decline
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="min-h-[300px] flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
             <InvoiceGrid invoices={invoices} onAction={onRowAction} />
           </div>
         </section>
@@ -302,28 +384,6 @@ export default function Home() {
         ))}
       </div>
     </div>
-  );
-}
-
-/** Minimal formatting for model replies: **bold** and bullet lines, without injecting HTML. */
-function RichText({ text }: { text: string }) {
-  return (
-    <>
-      {text.split("\n").map((line, i) => {
-        const bullet = /^\s*[-*•]\s+/.test(line);
-        const body = line.replace(/^\s*[-*•]\s+/, "");
-        const parts = body.split(/(\*\*[^*]+\*\*)/g).map((p, j) =>
-          p.startsWith("**") && p.endsWith("**") ? <strong key={j}>{p.slice(2, -2)}</strong> : p,
-        );
-        return (
-          <span key={i} className={bullet ? "block pl-3 -indent-3" : "block"}>
-            {bullet && "• "}
-            {parts}
-            {!line && " "}
-          </span>
-        );
-      })}
-    </>
   );
 }
 

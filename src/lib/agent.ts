@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
-import { GoogleGenAI, type Content, type Part } from "@google/genai";
+import { ApiError as GeminiApiError, GoogleGenAI, type Content, type Part } from "@google/genai";
 import { z } from "zod";
 import {
   computeInsights,
@@ -38,7 +38,8 @@ How to work:
 - If a required detail is missing (the client's email, the price), ask one short question instead of guessing. Never invent an email address.
 - Before proposing a reminder, look up the invoice so you know its real status, amount and how overdue it is. Adjust the tone to the situation: friendly when it is just due, firmer when it is well overdue, always professional. Write the reminder note in the user's voice. Sign it with their business name if you know it; otherwise end with a short closing like "Thanks!" and no name or placeholder.
 - When asked about cash flow, use payment_insights and give concrete numbers.
-- Keep replies short and skimmable, in plain text without markdown tables. Amounts always include the currency.`;
+- Keep replies short and skimmable, in plain text without markdown tables. Amounts always include the currency.
+- An approval card shows the full invoice or reminder text to the user, so do not repeat that text in your reply. One or two sentences saying what you prepared is enough.`;
 
 function brief(inv: Invoice) {
   return {
@@ -58,16 +59,16 @@ function brief(inv: Invoice) {
 
 // ---------- Provider-neutral tool definitions ----------
 
-type ToolDef<S extends z.ZodObject = z.ZodObject> = {
+export type ToolDef<S extends z.ZodObject = z.ZodObject> = {
   name: string;
   description: string;
   schema: S;
   run: (args: z.infer<S>) => Promise<string>;
 };
 
-const def = <S extends z.ZodObject>(t: ToolDef<S>) => t as unknown as ToolDef;
+export const def = <S extends z.ZodObject>(t: ToolDef<S>) => t as unknown as ToolDef;
 
-function buildTools(proposals: Proposal[], state: { mutated: boolean }): ToolDef[] {
+function buildTools(proposals: Proposal[], state: { mutated: boolean }, baseUrl?: string): ToolDef[] {
   return [
     def({
       name: "list_invoices",
@@ -175,9 +176,16 @@ function buildTools(proposals: Proposal[], state: { mutated: boolean }): ToolDef
           title: `Remind ${inv.clientName} about ${inv.number}`,
           detail: `${inv.due.toFixed(2)} ${inv.currency} due${inv.daysOverdue ? ` · ${inv.daysOverdue} days overdue` : ""}`,
           subject,
-          note,
+          // Give the client a way to respond: their page lets them ask for a plan or more time.
+          note: baseUrl
+            ? `${note.trim()}\n\nNeed more time or a payment plan? Tell us here: ${baseUrl}/c/${inv.id}`
+            : note,
         });
-        return JSON.stringify({ ok: true, status: "Reminder queued for user approval" });
+        return JSON.stringify({
+          ok: true,
+          status: "Reminder queued for user approval",
+          ...(baseUrl ? { note: "A link to the client's page is added to the end of the note automatically; do not add one yourself." } : {}),
+        });
       },
     }),
 
@@ -239,15 +247,24 @@ function toGeminiSchema(schema: z.ZodObject): unknown {
   return clean(z.toJSONSchema(schema, { io: "input" }));
 }
 
-async function runGemini(tools: ToolDef[], history: ChatTurn[]): Promise<string> {
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const DEFAULT_FALLBACKS = "gemini-3-flash-preview,gemini-3.5-flash-lite,gemini-3.1-flash-lite";
+/** Model name -> time until which it is skipped because its daily free quota ran out. */
+const dailyLimitHit = new Map<string, number>();
+
+async function runGemini(system: string, tools: ToolDef[], history: ChatTurn[]): Promise<string> {
+  // v1beta also serves the preview models, which have their own free quotas.
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+    apiVersion: "v1beta",
+    httpOptions: { timeout: 40_000 },
+  });
   const model = process.env.GEMINI_MODEL || "gemini-3.5-flash";
   const contents: Content[] = history.map((t) => ({
     role: t.role === "assistant" ? "model" : "user",
     parts: [{ text: t.content }],
   }));
   const config = {
-    systemInstruction: SYSTEM,
+    systemInstruction: system,
     tools: [
       {
         functionDeclarations: tools.map((t) => ({
@@ -259,8 +276,47 @@ async function runGemini(tools: ToolDef[], history: ChatTurn[]): Promise<string>
     ],
   };
 
+  // Free-tier models have small daily limits (as low as 20 requests a day), are sometimes
+  // busy (503) and have per-minute limits (429). So there is a chain of models:
+  // - a model that hit its daily limit is skipped for the next hour, without waiting;
+  // - a busy model is retried after a short wait, then the next model is tried;
+  // - once a model has answered in this conversation it is preferred, so its tool-call
+  //   turns stay valid, and the others are only used if it stops answering.
+  const chain = [model, ...(process.env.GEMINI_FALLBACK_MODELS ?? DEFAULT_FALLBACKS).split(",")]
+    .map((m) => m.trim())
+    .filter((m, i, all) => m && all.indexOf(m) === i);
+  let active: string | null = null;
+  const generate = async () => {
+    const now = Date.now();
+    const usable = chain.filter((m) => (dailyLimitHit.get(m) ?? 0) < now);
+    const ordered = usable.length ? usable : chain;
+    const candidates = active ? [active, ...ordered.filter((m) => m !== active)] : ordered;
+    let lastErr: unknown;
+    for (const m of candidates) {
+      const tries = m === active ? 3 : 2;
+      for (let attempt = 0; attempt < tries; attempt++) {
+        try {
+          const res = await ai.models.generateContent({ model: m, contents, config });
+          active = m;
+          return res;
+        } catch (err) {
+          lastErr = err;
+          const api = err instanceof GeminiApiError ? err : null;
+          const timedOut = !api && /timeout|timed out|abort|fetch failed/i.test(String((err as Error)?.message));
+          if (!timedOut && !(api && [429, 500, 503].includes(api.status))) throw err;
+          if (api?.status === 429 && /per day/i.test(api.message)) {
+            dailyLimitHit.set(m, now + 60 * 60 * 1000);
+            break;
+          }
+          if (attempt < tries - 1) await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
+        }
+      }
+    }
+    throw lastErr;
+  };
+
   for (let step = 0; step < 8; step++) {
-    const res = await ai.models.generateContent({ model, contents, config });
+    const res = await generate();
     const calls = res.functionCalls;
     if (!calls?.length) return res.text ?? "";
     // Keep the model's turn unchanged (it may carry thought signatures).
@@ -279,7 +335,7 @@ async function runGemini(tools: ToolDef[], history: ChatTurn[]): Promise<string>
   return "I ran out of steps on that one. Could you try a simpler request?";
 }
 
-async function runClaude(tools: ToolDef[], history: ChatTurn[]): Promise<string> {
+async function runClaude(system: string, tools: ToolDef[], history: ChatTurn[]): Promise<string> {
   const client = new Anthropic();
   const final = await client.beta.messages.toolRunner({
     model: process.env.ANTHROPIC_MODEL || "claude-opus-5-5",
@@ -289,7 +345,7 @@ async function runClaude(tools: ToolDef[], history: ChatTurn[]): Promise<string>
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     cache_control: { type: "ephemeral" },
-    system: SYSTEM,
+    system,
     tools: tools.map((t) =>
       betaZodTool({
         name: t.name,
@@ -307,10 +363,17 @@ async function runClaude(tools: ToolDef[], history: ChatTurn[]): Promise<string>
     .join("\n");
 }
 
-export async function runAgent(input: ChatTurn[]) {
+/** Run a tool-using conversation on whichever provider is configured. */
+export async function runWithTools(system: string, tools: ToolDef[], history: ChatTurn[]): Promise<string> {
+  if (process.env.GEMINI_API_KEY) return runGemini(system, tools, history);
+  if (process.env.ANTHROPIC_API_KEY) return runClaude(system, tools, history);
+  throw new Error("No AI key configured. Add GEMINI_API_KEY (free) to .env.local.");
+}
+
+export async function runAgent(input: ChatTurn[], opts: { baseUrl?: string } = {}) {
   const proposals: Proposal[] = [];
   const state = { mutated: false };
-  const tools = buildTools(proposals, state);
+  const tools = buildTools(proposals, state, opts.baseUrl);
 
   const business = process.env.PAYPAL_BUSINESS_NAME;
   const history = input.slice(-20).map((t) => ({ ...t }));
@@ -318,11 +381,13 @@ export async function runAgent(input: ChatTurn[]) {
   const last = history[history.length - 1];
   last.content = `[Today is ${today()}${business ? `; my business name is ${business}` : ""}]\n\n${last.content}`;
 
-  let reply: string;
-  if (process.env.GEMINI_API_KEY) reply = await runGemini(tools, history);
-  else if (process.env.ANTHROPIC_API_KEY) reply = await runClaude(tools, history);
-  else throw new Error("No AI key configured. Add GEMINI_API_KEY (free) to .env.local.");
-
+  let reply = "";
+  try {
+    reply = await runWithTools(SYSTEM, tools, history);
+  } catch (err) {
+    // If the AI service fails after the tools already prepared something, keep that work.
+    if (!proposals.length) throw err;
+  }
   reply = reply.trim() || (proposals.length ? "I've prepared the items below for your approval." : "Done.");
   return { reply, proposals, refresh: state.mutated };
 }

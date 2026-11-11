@@ -83,6 +83,7 @@ export type RawInvoice = {
     invoice_number?: string;
     invoice_date?: string;
     currency_code: string;
+    reference?: string;
     note?: string;
     payment_term?: { term_type?: string; due_date?: string };
     metadata?: {
@@ -119,6 +120,8 @@ export type Invoice = {
   daysOverdue: number;
   payerUrl: string;
   items: string;
+  /** Free-text reference; payment-plan instalments carry "Plan <original number> k/n". */
+  reference: string;
 };
 
 const OPEN_STATUSES = new Set([
@@ -152,11 +155,12 @@ export function normalize(inv: RawInvoice): Invoice {
     "—";
   const total = Number(inv.amount?.value ?? 0);
   const paid = Number(inv.payments?.paid_amount?.value ?? 0);
-  const due = inv.due_amount
-    ? Number(inv.due_amount.value)
-    : isOpen(inv.status)
-      ? total - paid
-      : 0;
+  // Only open invoices are owed; PayPal still reports a due amount on cancelled ones.
+  const due = !isOpen(inv.status) && inv.status !== "DRAFT"
+    ? 0
+    : inv.due_amount
+      ? Number(inv.due_amount.value)
+      : total - paid;
   const dueDate = inv.detail.payment_term?.due_date ?? "";
   const overdue =
     isOpen(inv.status) && dueDate ? Math.max(0, daysBetween(dueDate, today())) : 0;
@@ -175,6 +179,7 @@ export function normalize(inv: RawInvoice): Invoice {
     daysOverdue: overdue,
     payerUrl: inv.detail.metadata?.recipient_view_url ?? "",
     items: (inv.items ?? []).map((i) => `${i.quantity}× ${i.name}`).join(", "),
+    reference: inv.detail.reference ?? "",
   };
 }
 
@@ -184,7 +189,7 @@ export function normalize(inv: RawInvoice): Invoice {
 // record is fetched once and cached until PayPal reports it changed.
 const detailCache = new Map<string, Invoice>();
 
-export async function listInvoices(): Promise<Invoice[]> {
+async function listSummaries(): Promise<RawInvoice[]> {
   const summaries: RawInvoice[] = [];
   for (let page = 1; page <= 5; page++) {
     const res = await pp<{ items?: RawInvoice[]; total_pages?: number }>(
@@ -193,6 +198,24 @@ export async function listInvoices(): Promise<Invoice[]> {
     summaries.push(...(res.items ?? []));
     if (!res.total_pages || page >= res.total_pages) break;
   }
+  return summaries;
+}
+
+/**
+ * Next plain numeric invoice number (0001, 0002, ...). PayPal's own generator follows the
+ * last number used, whatever its format, so numbering is kept here instead.
+ */
+export async function nextInvoiceNumber(offset = 0): Promise<string> {
+  const numbers = (await listSummaries())
+    .map((s) => s.detail.invoice_number ?? "")
+    .filter((n) => /^\d+$/.test(n))
+    .map(Number);
+  const next = (numbers.length ? Math.max(...numbers) : 0) + 1 + offset;
+  return String(next).padStart(4, "0");
+}
+
+export async function listInvoices(): Promise<Invoice[]> {
+  const summaries = await listSummaries();
   return Promise.all(
     summaries.map(async (s) => {
       const key = `${s.id}|${s.status}|${s.detail.metadata?.last_update_time ?? ""}|${s.due_amount?.value ?? ""}`;
@@ -221,6 +244,9 @@ export type DraftInput = {
   invoiceDate?: string;
   dueDate?: string;
   note?: string;
+  /** Invoice number to use; computed when omitted. */
+  number?: string;
+  reference?: string;
   items: {
     name: string;
     description?: string;
@@ -231,16 +257,14 @@ export type DraftInput = {
 };
 
 export async function createDraftInvoice(input: DraftInput): Promise<Invoice> {
-  const { invoice_number } = await pp<{ invoice_number: string }>(
-    "/v2/invoicing/generate-next-invoice-number",
-    { method: "POST" },
-  );
+  const invoice_number = input.number ?? (await nextInvoiceNumber());
   const [given, ...rest] = input.recipientName.trim().split(/\s+/);
   const body = {
     detail: {
       invoice_number,
       invoice_date: input.invoiceDate ?? today(),
       currency_code: input.currency,
+      ...(input.reference ? { reference: input.reference } : {}),
       note: input.note ?? "Thank you for your business!",
       ...(input.dueDate
         ? { payment_term: { term_type: "DUE_ON_DATE_SPECIFIED", due_date: input.dueDate } }
@@ -283,6 +307,30 @@ export async function sendInvoice(id: string) {
     body: { send_to_invoicer: true, send_to_recipient: true },
   });
   return getInvoice(id);
+}
+
+/** Change the due date of an invoice (PayPal needs the full invoice object back). */
+export async function updateDueDate(id: string, dueDate: string) {
+  const raw = await pp<Record<string, unknown> & { detail: Record<string, unknown> }>(
+    `/v2/invoicing/invoices/${encodeURIComponent(id)}`,
+  );
+  // Drop read-only fields before sending the object back.
+  const { id: _id, status: _status, links: _links, due_amount: _due, payments: _pay, refunds: _ref, ...body } = raw;
+  void [_id, _status, _links, _due, _pay, _ref];
+  const { metadata: _meta, ...detail } = raw.detail;
+  void _meta;
+  await pp(`/v2/invoicing/invoices/${encodeURIComponent(id)}?send_to_recipient=true&send_to_invoicer=false`, {
+    method: "PUT",
+    body: {
+      ...body,
+      detail: { ...detail, payment_term: { term_type: "DUE_ON_DATE_SPECIFIED", due_date: dueDate } },
+    },
+  });
+  return getInvoice(id);
+}
+
+export async function deleteDraft(id: string) {
+  await pp(`/v2/invoicing/invoices/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function remindInvoice(id: string, subject: string, note: string) {
