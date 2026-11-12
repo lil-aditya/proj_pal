@@ -40,7 +40,7 @@ export default function Page() {
     <Suspense
       fallback={
         <Shell>
-          <div className="h-48 animate-pulse rounded-2xl bg-slate-200/70" />
+          <div className="h-48 animate-pulse rounded-lg bg-line/60" />
         </Shell>
       }
     >
@@ -106,9 +106,9 @@ function ClientPage() {
   if (notFound) {
     return (
       <Shell>
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-          <p className="text-lg font-semibold">Invoice not found</p>
-          <p className="mt-1 text-sm text-slate-500">Check the link in your email, or contact the business that sent it.</p>
+        <div className="rounded-lg border border-line bg-card p-8 text-center">
+          <p className="font-serif text-2xl">Invoice not found</p>
+          <p className="mt-1 text-sm text-muted">Check the link in your email, or contact the business that sent it.</p>
         </div>
       </Shell>
     );
@@ -116,7 +116,7 @@ function ClientPage() {
   if (!data) {
     return (
       <Shell>
-        <div className="h-48 animate-pulse rounded-2xl bg-slate-200/70" />
+        <div className="h-48 animate-pulse rounded-lg bg-line/60" />
       </Shell>
     );
   }
@@ -128,76 +128,70 @@ function ClientPage() {
 
   return (
     <Shell>
-      <p className="text-sm text-slate-500">
-        Invoice {inv.number} from <span className="font-medium text-slate-700">{business}</span>
+      <p className="text-sm text-muted">
+        Invoice <span className="num">{inv.number}</span> from <span className="text-ink">{business}</span>
       </p>
 
-      <section className="mt-2 rounded-2xl border border-slate-200 bg-white p-5">
-        <p className="text-sm text-slate-500">Hi {inv.clientName.split(" ")[0]},</p>
+      <section className="mt-3 rounded-lg border border-line bg-card p-6">
+        <p className="text-sm text-muted">Hi {inv.clientName.split(" ")[0]},</p>
         {instalments ? (
           <>
-            <p className="mt-1 text-sm text-slate-500">Left to pay on your plan</p>
-            <p className="text-4xl font-semibold tracking-tight">{fmtMoney(planLeft, inv.currency)}</p>
+            <p className="mt-3 text-sm text-muted">Left to pay on your plan</p>
+            <p className="num font-serif text-5xl leading-tight">{fmtMoney(planLeft, inv.currency)}</p>
           </>
         ) : (
           <>
-            <p className="mt-1 text-sm text-slate-500">{paid ? "Paid in full" : "Amount owed"}</p>
-            <p className={`text-4xl font-semibold tracking-tight ${paid ? "text-emerald-600" : ""}`}>
+            <p className="mt-3 text-sm text-muted">{paid ? "Paid in full" : "Amount owed"}</p>
+            <p className={`num font-serif text-5xl leading-tight ${paid ? "text-good" : ""}`}>
               {fmtMoney(paid ? inv.total : inv.due, inv.currency)}
             </p>
             {open && inv.dueDate && (
-              <p className="mt-1 text-sm">
+              <p className="num mt-1 text-sm">
                 Due {fmtDate(inv.dueDate)}
-                {inv.daysOverdue > 0 && (
-                  <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
-                    {inv.daysOverdue} days overdue
-                  </span>
-                )}
+                {inv.daysOverdue > 0 && <span className="ml-2 font-medium text-bad">{inv.daysOverdue} days overdue</span>}
               </p>
             )}
           </>
         )}
-        <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-600">{inv.items}</p>
+        <p className="mt-4 border-t border-line pt-3 text-sm text-muted">{inv.items}</p>
 
         {open && !instalments && (
           <a
             href={inv.payerUrl}
             target="_blank"
             rel="noreferrer"
-            className="mt-4 block rounded-xl bg-brand px-4 py-3 text-center font-medium text-white hover:opacity-95"
+            className="mt-5 block rounded-md bg-brand px-4 py-3 text-center font-medium text-white hover:opacity-90"
           >
             Pay {fmtMoney(inv.due, inv.currency)} with PayPal
           </a>
         )}
-        {paid && <p className="mt-3 text-sm font-medium text-emerald-700">✓ Thank you. This invoice is paid.</p>}
+        {paid && <p className="mt-4 text-sm font-medium text-good">Thank you. This invoice is paid.</p>}
       </section>
 
       {instalments && (
-        <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="font-semibold">Your payment plan</h2>
-          <ul className="mt-2 divide-y divide-slate-100">
+        <section className="mt-4 rounded-lg border border-line bg-card px-6 py-4">
+          <h2 className="font-serif text-xl">Your payment plan</h2>
+          <ul className="mt-1 divide-y divide-line">
             {instalments.map((i, k) => {
               const iPaid = PAID.includes(i.status);
               return (
                 <li key={i.number} className="flex items-center justify-between gap-3 py-3">
                   <div>
-                    <p className="text-sm font-medium">
-                      Instalment {k + 1} of {instalments.length} · {fmtMoney(i.total, i.currency)}
+                    <p className="num text-sm">
+                      <span className="text-muted">
+                        {k + 1} of {instalments.length}
+                      </span>
+                      <span className="ml-2 font-medium">{fmtMoney(i.total, i.currency)}</span>
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="num text-xs text-muted">
                       Due {fmtDate(i.dueDate)}
-                      {i.daysOverdue > 0 && <span className="ml-1 font-medium text-rose-600">· {i.daysOverdue} days overdue</span>}
+                      {i.daysOverdue > 0 && <span className="ml-1 font-medium text-bad">· {i.daysOverdue} days overdue</span>}
                     </p>
                   </div>
                   {iPaid ? (
-                    <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">✓ Paid</span>
+                    <span className="text-sm font-medium text-good">Paid</span>
                   ) : (
-                    <a
-                      href={i.payerUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white"
-                    >
+                    <a href={i.payerUrl} target="_blank" rel="noreferrer" className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:opacity-90">
                       Pay with PayPal
                     </a>
                   )}
@@ -210,12 +204,8 @@ function ClientPage() {
 
       {request && !instalments && (
         <div
-          className={`mt-4 rounded-2xl border p-4 text-sm ${
-            request.status === "pending"
-              ? "border-amber-200 bg-amber-50 text-amber-900"
-              : request.status === "approved"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                : "border-slate-200 bg-slate-50 text-slate-700"
+          className={`mt-4 rounded-lg border border-line border-l-2 bg-card px-4 py-3 text-sm ${
+            request.status === "pending" ? "border-l-warn" : request.status === "approved" ? "border-l-good" : "border-l-muted"
           }`}
         >
           <p className="font-medium">
@@ -227,31 +217,35 @@ function ClientPage() {
                   : "Your request was approved"
                 : "Your request was not approved. You can ask for something different below."}
           </p>
-          {request.kind !== "issue" && <p className="mt-0.5">{request.summary}</p>}
+          {request.kind !== "issue" && <p className="mt-0.5 text-muted">{request.summary}</p>}
         </div>
       )}
 
       {(open || messages.length > 0) && (
-        <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="font-semibold">Can&apos;t pay it all right now?</h2>
-          <p className="text-sm text-slate-500">
-            Chat with {business}&apos;s assistant about a payment plan or more time. Any change is confirmed by {business}.
+        <section className="mt-4 rounded-lg border border-line bg-card p-6">
+          <h2 className="font-serif text-xl">Can&apos;t pay it all right now?</h2>
+          <p className="mt-0.5 text-sm text-muted">
+            Ask {business}&apos;s assistant about a payment plan or more time. {business} confirms any change.
           </p>
 
           {messages.length > 0 && (
-            <div className="mt-3 space-y-2">
+            <div className="mt-4 space-y-3">
               {messages.map((m, i) => (
                 <div key={i} className={m.role === "user" ? "flex justify-end" : ""}>
                   <div
-                    className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm ${
-                      m.role === "user" ? "bg-brand-2 text-white" : m.error ? "bg-rose-50 text-rose-800" : "bg-slate-100"
+                    className={`whitespace-pre-wrap text-sm leading-relaxed ${
+                      m.role === "user"
+                        ? "max-w-[85%] rounded-2xl rounded-br-sm bg-ink px-3.5 py-2 text-white"
+                        : m.error
+                          ? "border-l-2 border-bad pl-3 text-bad"
+                          : "pr-6"
                     }`}
                   >
                     <RichText text={m.content} />
                   </div>
                 </div>
               ))}
-              {busy && <div className="w-fit animate-pulse rounded-2xl bg-slate-100 px-3.5 py-2 text-sm text-slate-500">Typing…</div>}
+              {busy && <p className="animate-pulse text-sm text-muted">Typing…</p>}
               <div ref={endRef} />
             </div>
           )}
@@ -259,7 +253,7 @@ function ClientPage() {
           {messages.length === 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
               {CHIPS.map((c) => (
-                <button key={c} onClick={() => send(c)} className="rounded-full border border-slate-300 px-3 py-1 text-xs hover:bg-slate-50">
+                <button key={c} onClick={() => send(c)} className="rounded-md border border-line px-3 py-1.5 text-[13px] hover:border-brand hover:text-brand">
                   {c}
                 </button>
               ))}
@@ -267,7 +261,7 @@ function ClientPage() {
           )}
 
           <form
-            className="mt-3 flex gap-2"
+            className="mt-4 flex gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               send(input);
@@ -278,27 +272,24 @@ function ClientPage() {
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type a message"
               maxLength={1000}
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-2"
+              className="min-w-0 flex-1 rounded-md border border-line bg-paper/50 px-3 py-2 text-sm outline-none focus:border-brand focus:bg-white"
             />
-            <button disabled={busy || !input.trim()} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+            <button disabled={busy || !input.trim()} className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-40">
               Send
             </button>
           </form>
         </section>
       )}
 
-      <p className="mt-4 text-center text-xs text-slate-400">Payments are handled by PayPal. This page never sees your card or bank details.</p>
+      <p className="mt-6 text-center text-xs text-muted">Payments are handled by PayPal. This page never sees your card or bank details.</p>
     </Shell>
   );
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="mx-auto w-full max-w-xl flex-1 px-4 py-8">
-      <div className="mb-5 flex items-center gap-2">
-        <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-brand to-brand-2 text-sm font-bold text-white">P</div>
-        <span className="text-sm font-semibold">PayPilot</span>
-      </div>
+    <main className="mx-auto w-full max-w-xl flex-1 px-4 py-10">
+      <p className="mb-6 font-serif text-2xl leading-none">PayPilot</p>
       {children}
     </main>
   );
