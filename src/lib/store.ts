@@ -1,6 +1,7 @@
 // Tiny JSON-file store for client requests and agreed payment plans.
 // Invoices themselves always come from PayPal; this only holds negotiation state.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 export type Instalment = { amount: number; dueDate: string };
@@ -32,7 +33,8 @@ export type Plan = {
 
 type Db = { requests: ClientRequest[]; plans: Record<string, Plan> };
 
-const FILE = path.join(process.cwd(), ".data", "paypilot.json");
+// Kept outside the project folder so writes don't trigger the dev server's file watcher.
+const FILE = path.join(os.tmpdir(), "paypilot.json");
 // Used when the filesystem is read-only; state then lasts until the process restarts.
 let memory: Db = { requests: [], plans: {} };
 
