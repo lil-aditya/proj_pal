@@ -26,16 +26,16 @@ next.js, react, typescript, tailwindcss, ag-grid, paypal-invoicing-api, paypal-s
 
 ## Try it out links
 
-- Live app: `https://<your-render-name>.onrender.com` (add after deploying)
-- Code: `https://github.com/lil-aditya/paypilot` (add after pushing)
+- Live app: `https://proj-pal.onrender.com`
+- Code: `https://github.com/lil-aditya/proj_pal`
 
 ## Image gallery
 
 Upload 3–5 screenshots, in this order:
 
-1. The dashboard with invoices and overdue badges (`devpost/screenshots/dashboard.png` is ready).
-2. The client request inbox (`devpost/screenshots/inbox.png` is ready).
-3. The client's page (`devpost/screenshots/client-page.png` is ready).
+1. The dashboard with invoices and overdue badges (`devpost/screenshots/1-dashboard.png`).
+2. The client's page (`devpost/screenshots/2-client-page.png`).
+3. The client request inbox (`devpost/screenshots/inbox.png`).
 4. The chat with an approval card, after "Invoice Sara…" or a reminder.
 5. The client's page showing an approved payment plan with its instalments.
 
@@ -43,7 +43,7 @@ Take 4 and 5 yourself with Win+Shift+S while recording the demo.
 
 ## Video demo link
 
-Upload the video to YouTube as **Unlisted** or **Public** and paste the link. See `devpost/video-script.md`.
+`https://youtu.be/Q2KLroWql4M`
 
 ## Short answers (for any extra form questions)
 

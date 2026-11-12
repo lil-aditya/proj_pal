@@ -4,6 +4,9 @@ Tell PayPilot about a job in plain words. It creates the PayPal invoice, tracks 
 
 Built for the PayPal AI Hackathon 2026.
 
+- **Demo video:** https://youtu.be/Q2KLroWql4M
+- **Live app:** https://proj-pal.onrender.com (free tier, so the first load can take about a minute while it wakes up)
+
 ## Features
 
 - Natural language → PayPal draft invoice (line items, quantities, due dates)
