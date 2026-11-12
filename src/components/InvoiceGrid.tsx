@@ -8,20 +8,36 @@ import type { Invoice } from "@/lib/paypal";
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 const theme = themeQuartz.withParams({
-  accentColor: "#1a73e8",
-  headerBackgroundColor: "#f1f5fb",
+  fontFamily: "inherit",
   fontSize: 13,
-  borderRadius: 8,
+  accentColor: "#12325c",
+  foregroundColor: "#1d1c1a",
+  backgroundColor: "#fffdf9",
+  headerBackgroundColor: "#fffdf9",
+  headerTextColor: "#6f6b63",
+  headerFontWeight: 500,
+  borderColor: "#e3dfd6",
+  rowBorder: { color: "#eeebe4" },
+  columnBorder: false,
+  wrapperBorder: false,
+  wrapperBorderRadius: 0,
+  rowHoverColor: "#f6f4ef",
+  selectedRowBackgroundColor: "#f0ede6",
+  cellHorizontalPadding: 14,
+  headerColumnResizeHandleColor: "transparent",
 });
 
-const STATUS_STYLE: Record<string, string> = {
-  PAID: "bg-emerald-100 text-emerald-800",
-  MARKED_AS_PAID: "bg-emerald-100 text-emerald-800",
-  SENT: "bg-blue-100 text-blue-800",
-  UNPAID: "bg-blue-100 text-blue-800",
-  PARTIALLY_PAID: "bg-amber-100 text-amber-800",
-  DRAFT: "bg-slate-100 text-slate-700",
-  CANCELLED: "bg-rose-100 text-rose-700",
+const NUM_RIGHT = "num flex items-center justify-end";
+const NUM_LEFT = "num flex items-center";
+
+const STATUS: Record<string, { dot: string; label: string }> = {
+  PAID: { dot: "bg-good", label: "Paid" },
+  MARKED_AS_PAID: { dot: "bg-good", label: "Paid" },
+  SENT: { dot: "bg-brand", label: "Sent" },
+  UNPAID: { dot: "bg-brand", label: "Unpaid" },
+  PARTIALLY_PAID: { dot: "bg-warn", label: "Part paid" },
+  DRAFT: { dot: "border border-muted bg-transparent", label: "Draft" },
+  CANCELLED: { dot: "bg-line", label: "Cancelled" },
 };
 
 function fmtMoney(n: number, currency: string) {
@@ -43,7 +59,7 @@ export default function InvoiceGrid({
 }) {
   const cols = useMemo<ColDef<Invoice>[]>(
     () => [
-      { field: "number", headerName: "Invoice", width: 92 },
+      { field: "number", headerName: "No.", width: 84, cellClass: `${NUM_LEFT} text-muted` },
       {
         field: "clientName",
         headerName: "Client",
@@ -52,56 +68,55 @@ export default function InvoiceGrid({
         tooltipField: "items",
         cellRenderer: (p: ICellRendererParams<Invoice>) => (
           <span className="flex h-full flex-col justify-center leading-tight">
-            <span className="truncate">{p.value}</span>
-            {p.data?.items && <span className="truncate text-xs text-slate-500">{p.data.items}</span>}
+            <span className={`truncate ${p.node.rowPinned ? "" : "font-medium"}`}>{p.value}</span>
+            {p.data?.items && <span className="truncate text-xs text-muted">{p.data.items}</span>}
           </span>
         ),
       },
       {
         field: "status",
-        width: 142,
+        width: 150,
         cellRenderer: (p: ICellRendererParams<Invoice>) => {
           if (p.node.rowPinned) return null;
-          const overdue = (p.data?.daysOverdue ?? 0) > 0;
+          const s = STATUS[p.value] ?? { dot: "bg-muted", label: String(p.value).toLowerCase() };
+          const late = p.data?.daysOverdue ?? 0;
           return (
-            <span className="flex h-full items-center gap-1.5">
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[p.value] ?? "bg-slate-100"}`}>
-                {String(p.value).replace(/_/g, " ").toLowerCase()}
-              </span>
-              {overdue && (
-                <span className="rounded-full bg-rose-600 px-2 py-0.5 text-xs font-medium text-white">
-                  {p.data!.daysOverdue}d late
-                </span>
-              )}
+            <span className="flex h-full items-center gap-2">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
+              <span className={p.value === "CANCELLED" ? "text-muted line-through" : ""}>{s.label}</span>
+              {late > 0 && <span className="num text-xs font-medium text-bad">{late}d late</span>}
             </span>
           );
         },
       },
       {
         field: "total",
-        width: 104,
+        width: 110,
         type: "rightAligned",
+        cellClass: NUM_RIGHT,
         valueFormatter: (p) => (p.data ? fmtMoney(p.value, p.data.currency) : ""),
       },
       {
         field: "due",
         headerName: "Owed",
-        width: 104,
+        width: 110,
         type: "rightAligned",
+        cellClass: NUM_RIGHT,
         valueFormatter: (p) => (p.data ? fmtMoney(p.value, p.data.currency) : ""),
       },
       {
         field: "dueDate",
         headerName: "Due",
-        width: 92,
+        width: 88,
         filter: false,
         sort: "asc",
+        cellClass: NUM_LEFT,
         valueFormatter: (p) =>
           p.value ? new Date(p.value).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }) : "",
       },
       {
-        headerName: "Actions",
-        width: 272,
+        headerName: "",
+        width: 250,
         pinned: "right",
         sortable: false,
         filter: false,
@@ -109,34 +124,32 @@ export default function InvoiceGrid({
           if (p.node.rowPinned) return null;
           const inv = p.data!;
           const open = ["SENT", "UNPAID", "PARTIALLY_PAID"].includes(inv.status);
-          const btn = "rounded-md px-2 py-0.5 text-xs font-medium border";
+          const link = "rounded px-1.5 py-0.5 text-[13px] text-brand hover:bg-paper hover:underline underline-offset-2";
           return (
-            <span className="flex h-full items-center gap-1.5">
+            <span className="flex h-full items-center gap-1">
               {inv.status === "DRAFT" && (
-                <button className={`${btn} border-blue-600 bg-blue-600 text-white`} onClick={() => onAction("send", inv)}>
+                <button className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-white hover:opacity-90" onClick={() => onAction("send", inv)}>
                   Send
                 </button>
               )}
               {open && (
                 <>
-                  <button className={`${btn} border-slate-300 bg-white`} onClick={() => onAction("remind-ai", inv)}>
-                    ✨ Remind
+                  <button className={link} onClick={() => onAction("remind-ai", inv)}>
+                    Remind
                   </button>
-                  <button className={`${btn} border-slate-300 bg-white`} onClick={() => onAction("record-payment", inv)}>
+                  <button className={link} onClick={() => onAction("record-payment", inv)}>
                     Mark paid
                   </button>
+                  <a
+                    className={link}
+                    href={`/c/${inv.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="The page your client sees: pay on PayPal, or ask for a plan or more time"
+                  >
+                    Client page ↗
+                  </a>
                 </>
-              )}
-              {open && (
-                <a
-                  className={`${btn} border-slate-300 bg-white`}
-                  href={`/c/${inv.id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="The page your client sees: pay on PayPal, or ask for a plan or more time"
-                >
-                  Client page
-                </a>
               )}
             </span>
           );
@@ -150,11 +163,11 @@ export default function InvoiceGrid({
   const totals = useMemo(() => {
     const byCur = new Map<string, Invoice>();
     for (const i of invoices) {
-      // Match the "Outstanding" card: drafts and cancelled invoices aren't owed yet.
+      // Match the "Outstanding" figure: drafts and cancelled invoices aren't owed yet.
       if (i.status === "CANCELLED" || i.status === "DRAFT") continue;
       const t =
         byCur.get(i.currency) ??
-        ({ id: `total-${i.currency}`, number: "Total", clientName: `${i.currency} · sent invoices`, currency: i.currency, total: 0, due: 0 } as Invoice);
+        ({ id: `total-${i.currency}`, number: "", clientName: `Total sent (${i.currency})`, currency: i.currency, total: 0, due: 0 } as Invoice);
       t.total += i.total;
       t.due += i.due;
       byCur.set(i.currency, t);
@@ -168,12 +181,13 @@ export default function InvoiceGrid({
         theme={theme}
         rowData={invoices}
         columnDefs={cols}
-        defaultColDef={{ sortable: true, filter: true, resizable: true }}
+        defaultColDef={{ sortable: true, resizable: true }}
         getRowId={(p) => p.data.id}
         pinnedBottomRowData={totals}
-        getRowStyle={(p) => (p.node.rowPinned ? { fontWeight: 600, background: "#f1f5fb" } : undefined)}
-        rowHeight={50}
-        overlayNoRowsTemplate="No invoices yet. Ask PayPilot to create one."
+        getRowStyle={(p) => (p.node.rowPinned ? { fontWeight: 600, background: "#f6f4ef" } : undefined)}
+        rowHeight={52}
+        headerHeight={40}
+        overlayNoRowsTemplate="No invoices yet. Describe a job in the panel on the right to create one."
       />
     </div>
   );

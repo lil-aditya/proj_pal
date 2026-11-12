@@ -30,6 +30,12 @@ const SUGGESTIONS = [
   "How is my cash flow this month?",
 ];
 
+const KIND_LABEL: Record<ClientRequest["kind"], string> = {
+  payment_plan: "Payment plan",
+  extension: "More time",
+  issue: "Question",
+};
+
 const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function Home() {
@@ -40,7 +46,7 @@ export default function Home() {
     {
       role: "assistant",
       content:
-        "Hi! I'm PayPilot. Tell me about work you've done and I'll draft the PayPal invoice. I can also chase late payers and explain your cash flow. Nothing is sent until you approve it.",
+        "Tell me about a job you've finished and I'll draft the PayPal invoice. I can also chase late payers and explain where your money is. Nothing goes out until you approve it.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -50,6 +56,7 @@ export default function Home() {
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [requests, setRequests] = useState<ClientRequest[]>([]);
   const [deciding, setDeciding] = useState("");
+  const [syncedAt, setSyncedAt] = useState<Date | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastStatus = useRef<Map<string, string> | null>(null);
   const seenRequests = useRef<Set<string> | null>(null);
@@ -71,13 +78,14 @@ export default function Home() {
         for (const inv of list) {
           const before = lastStatus.current.get(inv.id);
           if (before && before !== inv.status && (inv.status === "PAID" || inv.status === "MARKED_AS_PAID")) {
-            toast(`💸 ${inv.clientName} just paid invoice ${inv.number}: ${money(inv.total)}`);
+            toast(`${inv.clientName} just paid invoice ${inv.number}: ${money(inv.total)}`);
           }
         }
       }
       lastStatus.current = new Map(list.map((i) => [i.id, i.status]));
       setInvoices(list);
       setInsights(json.insights);
+      setSyncedAt(new Date());
       setLoadError("");
     } catch (e) {
       setLoadError((e as Error).message);
@@ -89,7 +97,7 @@ export default function Home() {
       const pending: ClientRequest[] = (await res.json()).pending;
       if (seenRequests.current) {
         for (const r of pending) {
-          if (!seenRequests.current.has(r.id)) toast(`📩 ${r.clientName} sent a request about invoice ${r.invoiceNumber}`);
+          if (!seenRequests.current.has(r.id)) toast(`${r.clientName} sent a request about invoice ${r.invoiceNumber}`);
         }
       }
       seenRequests.current = new Set(pending.map((r) => r.id));
@@ -109,9 +117,9 @@ export default function Home() {
         decision === "decline"
           ? `Declined ${r.clientName}'s request`
           : r.kind === "payment_plan"
-            ? `✅ Payment plan set up for ${r.clientName}: ${r.instalments?.length} instalment invoices sent`
+            ? `Payment plan set up for ${r.clientName}: ${r.instalments?.length} instalment invoices sent`
             : r.kind === "extension"
-              ? `✅ Due date moved for ${r.clientName}`
+              ? `Due date moved for ${r.clientName}`
               : `Marked ${r.clientName}'s message as handled`,
       );
     } catch (e) {
@@ -179,7 +187,7 @@ export default function Home() {
         ]);
         if (json.refresh) refresh();
       } catch (e) {
-        setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${(e as Error).message}`, error: true }]);
+        setMessages((m) => [...m, { role: "assistant", content: (e as Error).message, error: true }]);
       } finally {
         setBusy(false);
       }
@@ -209,7 +217,7 @@ export default function Home() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       updateCard(mi, ci, { state: "done" });
-      setMessages((m) => [...m, { role: "assistant", content: `✅ Done: ${card.title}.` }]);
+      setMessages((m) => [...m, { role: "assistant", content: `Done: ${card.title}.` }]);
       refresh();
     } catch (e) {
       updateCard(mi, ci, { state: "error", error: (e as Error).message });
@@ -234,22 +242,20 @@ export default function Home() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
-        <div className="flex items-center gap-2">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-brand to-brand-2 font-bold text-white">P</div>
-          <div>
-            <h1 className="text-lg font-semibold leading-tight">PayPilot</h1>
-            <p className="text-xs text-slate-500">AI back office · powered by PayPal</p>
-          </div>
+      <header className="flex items-baseline justify-between px-6 pb-3 pt-5">
+        <div className="flex items-baseline gap-3">
+          <h1 className="font-serif text-[28px] leading-none tracking-tight">PayPilot</h1>
+          <p className="hidden text-sm text-muted sm:block">Invoices and follow-ups on PayPal</p>
         </div>
-        <button onClick={refresh} className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50">
-          ↻ Refresh
+        <button onClick={refresh} className="num text-sm text-muted hover:text-ink">
+          {syncedAt ? `Synced ${syncedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Syncing…"}
+          <span className="ml-2 underline underline-offset-2">Refresh</span>
         </button>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_400px]">
-        <section className="flex min-h-0 flex-col gap-4">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <main className="grid min-h-0 flex-1 grid-cols-1 gap-5 px-6 pb-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="flex min-h-0 flex-col gap-5">
+          <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-line bg-card md:grid-cols-4">
             <Stat label="Outstanding" value={insights ? money(insights.outstanding) : "—"} />
             <Stat
               label="Overdue"
@@ -258,95 +264,99 @@ export default function Home() {
               tone={insights && insights.overdueCount > 0 ? "bad" : undefined}
             />
             <Stat label="Collected" value={insights ? money(insights.paidTotal) : "—"} tone="good" />
-            <Stat label="Drafts" value={insights ? String(insights.drafts) : "—"} sub={insights ? `${insights.totalInvoices} total` : ""} />
+            <Stat label="Drafts" value={insights ? String(insights.drafts) : "—"} sub={insights ? `of ${insights.totalInvoices} invoices` : ""} />
           </div>
+
           {loadError && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
-              Couldn&apos;t load invoices: {loadError}
-            </div>
+            <div className="rounded-lg border border-bad/30 bg-bad/5 px-4 py-2 text-sm text-bad">Couldn&apos;t load invoices: {loadError}</div>
           )}
+
           {requests.length > 0 && (
-            <div className="max-h-[42%] space-y-2 overflow-y-auto rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
-                Client requests · {requests.length} waiting for you
+            <div className="max-h-[42%] overflow-y-auto rounded-lg border border-line bg-card">
+              <p className="border-b border-line px-4 py-2.5 text-sm font-medium">
+                Waiting on you <span className="num text-muted">({requests.length})</span>
               </p>
               {requests.map((r) => (
-                <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white px-3 py-2.5">
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line border-l-2 border-l-warn px-4 py-3 last:border-b-0">
                   <div className="min-w-0 flex-1 text-sm">
-                    <p className="font-medium">
-                      {r.kind === "payment_plan" ? "🗓️" : r.kind === "extension" ? "⏳" : "❓"} {r.clientName} · invoice {r.invoiceNumber}
-                      <span className="ml-2 text-xs font-normal text-slate-500">
-                        {r.kind === "payment_plan" ? "asks for a payment plan" : r.kind === "extension" ? "asks for more time" : "has a question or problem"}
-                      </span>
+                    <p>
+                      <span className="font-medium">{r.clientName}</span>
+                      <span className="text-muted"> · invoice {r.invoiceNumber} · </span>
+                      <span className="text-warn">{KIND_LABEL[r.kind]}</span>
                     </p>
-                    <p className="text-slate-700">{r.summary}</p>
-                    {r.reason && <p className="text-xs italic text-slate-500">Client says: “{r.reason}”</p>}
+                    <p className="mt-0.5">{r.summary}</p>
+                    {r.reason && <p className="mt-0.5 text-[13px] text-muted">&ldquo;{r.reason}&rdquo;</p>}
                   </div>
                   <div className="flex shrink-0 gap-2">
-                    <button
-                      disabled={deciding === r.id}
-                      onClick={() => decide(r, "approve")}
-                      className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-                    >
-                      {deciding === r.id ? "Working…" : r.kind === "issue" ? "Mark as handled" : "Approve"}
-                    </button>
                     {r.kind !== "issue" && (
                       <button
                         disabled={deciding === r.id}
                         onClick={() => decide(r, "decline")}
-                        className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs disabled:opacity-50"
+                        className="rounded-md border border-line px-3 py-1.5 text-[13px] hover:bg-paper disabled:opacity-50"
                       >
                         Decline
                       </button>
                     )}
+                    <button
+                      disabled={deciding === r.id}
+                      onClick={() => decide(r, "approve")}
+                      className="rounded-md bg-brand px-3 py-1.5 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      {deciding === r.id ? "Working…" : r.kind === "issue" ? "Mark handled" : "Approve"}
+                    </button>
                   </div>
                 </div>
               ))}
             </div>
           )}
-          <div className="min-h-[300px] flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
+
+          <div className="min-h-[300px] flex-1 overflow-hidden rounded-lg border border-line bg-card">
             <InvoiceGrid invoices={invoices} onAction={onRowAction} />
           </div>
         </section>
 
-        <aside className="flex min-h-[500px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-200 px-4 py-3">
-            <h2 className="font-semibold">Ask PayPilot</h2>
-            <p className="text-xs text-slate-500">Drafts invoices and reminders. You approve every send.</p>
+        <aside className="flex min-h-[500px] flex-col overflow-hidden rounded-lg border border-line bg-card">
+          <div className="border-b border-line px-4 py-3">
+            <h2 className="font-serif text-xl leading-tight">Assistant</h2>
+            <p className="text-[13px] text-muted">Drafts invoices and reminders. You approve every send.</p>
           </div>
-          <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+          <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {messages.map((m, mi) => (
               <div key={mi} className={m.role === "user" ? "flex justify-end" : ""}>
                 <div
-                  className={`max-w-[90%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm ${
-                    m.role === "user" ? "bg-brand-2 text-white" : m.error ? "bg-rose-50 text-rose-800" : "bg-slate-100"
+                  className={`whitespace-pre-wrap text-sm leading-relaxed ${
+                    m.role === "user"
+                      ? "max-w-[85%] rounded-2xl rounded-br-sm bg-ink px-3.5 py-2 text-white"
+                      : m.error
+                        ? "border-l-2 border-bad pl-3 text-bad"
+                        : "pr-4"
                   }`}
                 >
                   <RichText text={m.content} />
                 </div>
                 {m.cards?.map((c, ci) => (
-                  <ApprovalCard
-                    key={ci}
-                    card={c}
-                    onChange={(patch) => updateCard(mi, ci, patch)}
-                    onApprove={() => approve(mi, ci, c)}
-                  />
+                  <ApprovalCard key={ci} card={c} onChange={(patch) => updateCard(mi, ci, patch)} onApprove={() => approve(mi, ci, c)} />
                 ))}
               </div>
             ))}
-            {busy && <div className="w-fit animate-pulse rounded-2xl bg-slate-100 px-3.5 py-2 text-sm text-slate-500">PayPilot is working…</div>}
+            {busy && <p className="animate-pulse text-sm text-muted">Working on it…</p>}
           </div>
           {messages.length <= 1 && (
-            <div className="flex flex-wrap gap-2 px-4 pb-2">
+            <div className="px-4 pb-3">
+              <p className="mb-1 text-xs text-muted">Try</p>
               {SUGGESTIONS.map((s) => (
-                <button key={s} onClick={() => send(s)} className="rounded-full border border-slate-300 px-3 py-1 text-left text-xs hover:bg-slate-50">
+                <button
+                  key={s}
+                  onClick={() => send(s)}
+                  className="block w-full border-t border-line py-2 text-left text-[13px] text-ink/80 hover:text-brand"
+                >
                   {s}
                 </button>
               ))}
             </div>
           )}
           <form
-            className="flex gap-2 border-t border-slate-200 p-3"
+            className="flex gap-2 border-t border-line p-3"
             onSubmit={(e) => {
               e.preventDefault();
               send(input);
@@ -355,8 +365,8 @@ export default function Home() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={listening ? "Listening…" : "e.g. Bill Acme $500 for the website audit"}
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-2"
+              placeholder={listening ? "Listening…" : "Bill Acme $500 for the website audit"}
+              className="min-w-0 flex-1 rounded-md border border-line bg-paper/50 px-3 py-2 text-sm outline-none placeholder:text-muted/70 focus:border-brand focus:bg-white"
             />
             {voiceSupported && (
               <button
@@ -364,21 +374,24 @@ export default function Home() {
                 onClick={startVoice}
                 title="Speak your request"
                 aria-label="Speak your request"
-                className={`rounded-lg border px-3 py-2 text-sm ${listening ? "animate-pulse border-rose-400 bg-rose-50" : "border-slate-300 bg-white hover:bg-slate-50"}`}
+                className={`grid w-10 place-items-center rounded-md border ${
+                  listening ? "animate-pulse border-bad text-bad" : "border-line text-muted hover:text-ink"
+                }`}
               >
-                🎤
+                <MicIcon />
               </button>
             )}
-            <button disabled={busy || !input.trim()} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+            <button disabled={busy || !input.trim()} className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-40">
               Send
             </button>
           </form>
         </aside>
       </main>
 
-      <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex flex-col gap-2" aria-live="polite">
+      <div className="pointer-events-none fixed bottom-5 left-5 z-50 flex flex-col gap-2" aria-live="polite">
         {toasts.map((t) => (
-          <div key={t.id} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg">
+          <div key={t.id} className="flex items-center gap-2.5 rounded-md bg-ink px-4 py-3 text-sm text-white shadow-lg">
+            <span className="h-2 w-2 rounded-full bg-[#7fc6a0]" />
             {t.text}
           </div>
         ))}
@@ -402,57 +415,64 @@ function getSpeechRecognition(): (new () => SpeechRec) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+function MicIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+    </svg>
+  );
+}
+
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "good" | "bad" }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold ${tone === "bad" ? "text-rose-600" : tone === "good" ? "text-emerald-600" : ""}`}>{value}</p>
-      {sub && <p className="text-xs text-slate-500">{sub}</p>}
+    <div className="border-line px-5 py-4 [&:not(:last-child)]:border-r max-md:[&:nth-child(2)]:border-r-0 max-md:[&:nth-child(-n+2)]:border-b">
+      <p className="text-[13px] text-muted">{label}</p>
+      <p className={`num mt-1 font-serif text-[30px] leading-none ${tone === "bad" ? "text-bad" : tone === "good" ? "text-good" : ""}`}>{value}</p>
+      <p className="num mt-1.5 h-4 text-xs text-muted">{sub}</p>
     </div>
   );
 }
 
 function ApprovalCard({ card, onChange, onApprove }: { card: Card; onChange: (p: Partial<Card>) => void; onApprove: () => void }) {
-  const icon = card.kind === "send_invoice" ? "📨" : card.kind === "send_reminder" ? "🔔" : "🗑️";
   const editable = card.state === "pending" || card.state === "error";
   return (
-    <div className="mt-2 max-w-[95%] rounded-xl border border-blue-200 bg-blue-50/60 p-3 text-sm">
-      <p className="font-medium">
-        {icon} {card.title}
-      </p>
-      <p className="mt-0.5 text-xs text-slate-600">{card.detail}</p>
+    <div className="mt-3 rounded-md border border-line bg-paper/60 p-3 text-sm">
+      <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Needs your approval</p>
+      <p className="mt-1 font-medium">{card.title}</p>
+      <p className="mt-0.5 text-[13px] text-muted">{card.detail}</p>
       {card.kind === "send_reminder" && (
         <div className="mt-2 space-y-1.5">
           <input
             disabled={!editable}
             value={card.subject}
             onChange={(e) => onChange({ subject: e.target.value } as Partial<Card>)}
-            className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
+            className="w-full rounded border border-line bg-white px-2 py-1 text-[13px] outline-none focus:border-brand"
           />
           <textarea
             disabled={!editable}
             value={card.note}
             rows={5}
             onChange={(e) => onChange({ note: e.target.value } as Partial<Card>)}
-            className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
+            className="w-full rounded border border-line bg-white px-2 py-1 text-[13px] leading-relaxed outline-none focus:border-brand"
           />
         </div>
       )}
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2.5 flex items-center gap-3">
         {editable && (
           <>
-            <button onClick={onApprove} className="rounded-md bg-brand px-3 py-1 text-xs font-medium text-white">
+            <button onClick={onApprove} className="rounded-md bg-brand px-3 py-1.5 text-[13px] font-medium text-white hover:opacity-90">
               Approve &amp; send
             </button>
-            <button onClick={() => onChange({ state: "dismissed" })} className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs">
+            <button onClick={() => onChange({ state: "dismissed" })} className="text-[13px] text-muted hover:text-ink">
               Dismiss
             </button>
           </>
         )}
-        {card.state === "working" && <span className="text-xs text-slate-500">Sending…</span>}
-        {card.state === "done" && <span className="text-xs font-medium text-emerald-700">✓ Approved and sent</span>}
-        {card.state === "dismissed" && <span className="text-xs text-slate-500">Dismissed</span>}
-        {card.state === "error" && <span className="text-xs text-rose-700">{card.error}</span>}
+        {card.state === "working" && <span className="text-[13px] text-muted">Sending…</span>}
+        {card.state === "done" && <span className="text-[13px] font-medium text-good">Approved and sent</span>}
+        {card.state === "dismissed" && <span className="text-[13px] text-muted">Dismissed</span>}
+        {card.state === "error" && <span className="text-[13px] text-bad">{card.error}</span>}
       </div>
     </div>
   );
